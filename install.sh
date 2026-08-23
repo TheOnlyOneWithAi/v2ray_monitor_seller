@@ -14,10 +14,27 @@ case "$PORT" in ''|*[!0-9]*) echo "Invalid WEB_PORT: $PORT" >&2; exit 1;; esac
 MONITOR_API_URL="${MONITOR_API_URL:-}"; [ -n "$MONITOR_API_URL" ] || MONITOR_API_URL="$(prompt_optional 'V2Ray Monitor API URL (e.g. http://127.0.0.1:8000)')"
 MONITOR_API_TOKEN="${MONITOR_API_TOKEN:-}"; [ -n "$MONITOR_API_TOKEN" ] || MONITOR_API_TOKEN="$(prompt_optional 'V2Ray Monitor Seller API token')"
 MONITOR_WEBAPP_URL="${MONITOR_WEBAPP_URL:-}"; [ -n "$MONITOR_WEBAPP_URL" ] || MONITOR_WEBAPP_URL="$(prompt_optional 'V2Ray Monitor WebApp URL (e.g. https://monitor.example.com)')"
+
 mkdir -p /opt
-if [ -d "$APP/.git" ]; then git -C "$APP" fetch --depth=1 origin main; git -C "$APP" reset --hard origin/main; else rm -rf "$APP"; git clone --depth=1 --branch main "$REPO" "$APP"; fi
-cd "$APP"; python3 -m venv .venv; . "$APP/.venv/bin/activate"; python -m pip install --upgrade pip; python -m pip install -r requirements.txt
-KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"; mkdir -p data
+if [ -d "$APP/.git" ]; then
+    git -C "$APP" config --local --add safe.directory "$APP" 2>/dev/null || true
+    git -C "$APP" fetch --depth=1 origin main
+    git -C "$APP" reset --hard origin/main
+else
+    rm -rf "$APP"
+    git clone --depth=1 --branch main "$REPO" "$APP"
+fi
+
+cd "$APP"
+python3 -m venv .venv
+. "$APP/.venv/bin/activate"
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+
+id v2ray-seller >/dev/null 2>&1 || useradd --system --home "$APP" --shell /usr/sbin/nologin v2ray-seller
+
+KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+mkdir -p data
 cat > .env <<EOF
 BOT_TOKEN=$TOKEN
 ADMIN_IDS=$ADMIN_IDS_VALUE
@@ -28,19 +45,25 @@ MONITOR_API_URL=$MONITOR_API_URL
 MONITOR_API_TOKEN=$MONITOR_API_TOKEN
 MONITOR_WEBAPP_URL=$MONITOR_WEBAPP_URL
 EOF
+
+# The application is intentionally run as v2ray-seller. Make BOTH the
+# environment file and its parent tree readable by that account.
+chown v2ray-seller:v2ray-seller .env
 chmod 600 .env
-id v2ray-seller >/dev/null 2>&1 || useradd --system --home "$APP" --shell /usr/sbin/nologin v2ray-seller
-chown -R v2ray-seller:v2ray-seller "$APP/data"
+chown -R v2ray-seller:v2ray-seller "$APP"
+chmod 750 "$APP"
+chmod 700 "$APP/data"
+
 cat >/etc/systemd/system/v2ray-monitor-seller.service <<EOF
 [Unit]
 Description=V2Ray Monitor Seller Bot
 After=network-online.target
 Wants=network-online.target
+
 [Service]
 User=v2ray-seller
 Group=v2ray-seller
 WorkingDirectory=$APP
-EnvironmentFile=$APP/.env
 ExecStart=$APP/.venv/bin/python -m app.main
 Restart=always
 RestartSec=5
@@ -49,9 +72,18 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=$APP/data
+
 [Install]
 WantedBy=multi-user.target
 EOF
-systemctl daemon-reload; systemctl enable --now v2ray-monitor-seller.service
-if ! systemctl is-active --quiet v2ray-monitor-seller.service; then journalctl -u v2ray-monitor-seller.service --no-pager -n 80 || true; echo 'ERROR: seller service failed to start' >&2; exit 1; fi
-echo "Seller installed successfully. WebApp: $MONITOR_WEBAPP_URL"; echo "Service: systemctl status v2ray-monitor-seller"
+
+systemctl daemon-reload
+systemctl enable --now v2ray-monitor-seller.service
+if ! systemctl is-active --quiet v2ray-monitor-seller.service; then
+    journalctl -u v2ray-monitor-seller.service --no-pager -n 80 || true
+    echo 'ERROR: seller service failed to start' >&2
+    exit 1
+fi
+
+echo "Seller installed successfully. WebApp: $MONITOR_WEBAPP_URL"
+echo "Service: systemctl status v2ray-monitor-seller"
