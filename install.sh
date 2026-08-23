@@ -6,7 +6,6 @@ MONITOR_APP="/opt/v2ray-monitor"
 REPO="https://github.com/TheOnlyOneWithAi/v2ray_monitor_seller.git"
 TTY=/dev/tty
 prompt(){ local v=''; while [ -z "$v" ]; do printf '%s: ' "$1" >"$TTY"; IFS= read -r v <"$TTY" || exit 1; done; printf '%s' "$v"; }
-prompt_optional(){ local v=''; printf '%s: ' "$1" >"$TTY"; IFS= read -r v <"$TTY" || v=''; printf '%s' "$v"; }
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y ca-certificates git python3 python3-venv python3-pip
@@ -17,19 +16,15 @@ ADMIN_IDS_VALUE="${ADMIN_IDS:-}"
 PORT="${WEB_PORT:-8090}"
 case "$PORT" in ''|*[!0-9]*) echo "Invalid WEB_PORT: $PORT" >&2; exit 1;; esac
 (( PORT >= 1 && PORT <= 65535 )) || { echo "Invalid WEB_PORT: $PORT" >&2; exit 1; }
-# Automatically link Seller to the installed Monitor.
+# Seller talks to the Monitor locally. No Seller API token is used.
 MONITOR_API_URL="${MONITOR_API_URL:-}"
-MONITOR_API_TOKEN="${MONITOR_API_TOKEN:-}"
 MONITOR_PORT=""
 if [ -f "$MONITOR_APP/.env" ]; then
-    [ -n "$MONITOR_API_TOKEN" ] || MONITOR_API_TOKEN="$(sed -n 's/^SELLER_API_TOKEN=//p' "$MONITOR_APP/.env" | head -n1 | sed 's/^"//; s/"$//')"
     MONITOR_PORT="$(sed -n 's/^WEB_PORT=//p' "$MONITOR_APP/.env" | head -n1 | sed 's/^"//; s/"$//')"
     if [ -z "$MONITOR_API_URL" ] && [ -n "$MONITOR_PORT" ]; then MONITOR_API_URL="http://127.0.0.1:${MONITOR_PORT}"; fi
 fi
-MONITOR_API_URL="${MONITOR_API_URL:-http://127.0.0.1:8000}"
-MONITOR_API_TOKEN="${MONITOR_API_TOKEN:-}"
-[ -n "$MONITOR_API_TOKEN" ] || MONITOR_API_TOKEN="$(prompt 'Monitor SELLER_API_TOKEN (only if Monitor was not installed here)')"
-MONITOR_WEBAPP_URL="${MONITOR_WEBAPP_URL:-http://127.0.0.1:8000}"
+MONITOR_API_URL="${MONITOR_API_URL:-http://127.0.0.1:8091}"
+MONITOR_WEBAPP_URL="${MONITOR_WEBAPP_URL:-$MONITOR_API_URL}"
 mkdir -p /opt
 if [ -d "$APP/.git" ]; then
     git -C "$APP" config --local --add safe.directory "$APP" 2>/dev/null || true
@@ -54,7 +49,6 @@ WEB_PORT="$PORT"
 DATABASE_URL="sqlite+aiosqlite:///$APP/data/seller.db"
 ENCRYPTION_KEY="$KEY"
 MONITOR_API_URL="$(printf '%s' "$MONITOR_API_URL" | sed 's/\\/\\\\/g; s/"/\\"/g')"
-MONITOR_API_TOKEN="$(printf '%s' "$MONITOR_API_TOKEN" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 MONITOR_WEBAPP_URL="$(printf '%s' "$MONITOR_WEBAPP_URL" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 EOF
 chown -R v2ray-seller:v2ray-seller "$APP"
@@ -96,4 +90,5 @@ systemctl restart v2ray-monitor-seller.service
 sleep 2
 if ! systemctl is-active --quiet v2ray-monitor-seller.service; then journalctl -u v2ray-monitor-seller.service --no-pager -n 80 || true; echo 'ERROR: seller service failed to start' >&2; exit 1; fi
 echo "Seller installed successfully."
+echo "Seller API token: NOT REQUIRED"
 echo "Service: systemctl status v2ray-monitor-seller"
