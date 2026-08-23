@@ -5,9 +5,14 @@ APP=/opt/v2ray-monitor-seller
 REPO=https://github.com/TheOnlyOneWithAi/v2ray_monitor_seller.git
 ask(){ local v=''; while [[ -z $v ]]; do read -r -p "$1: " v; done; printf '%s' "$v"; }
 apt-get update -y && apt-get install -y ca-certificates git python3 python3-venv python3-pip
-TOKEN="$(ask 'Telegram Bot Token')"
-ADMINS="$(ask 'Admin Telegram ID(s), comma-separated')"
+
+# Keep compatibility with both the old ADMINS name and ADMIN_IDS.
+TOKEN="${BOT_TOKEN:-}"
+[[ -n "$TOKEN" ]] || TOKEN="$(ask 'Telegram Bot Token')"
+ADMINS="${ADMIN_IDS:-${ADMINS:-}}"
+[[ -n "$ADMINS" ]] || ADMINS="$(ask 'Admin Telegram ID(s), comma-separated')"
 PORT="${WEB_PORT:-8090}"
+
 mkdir -p /opt
 if [[ -d "$APP/.git" ]]; then git -C "$APP" fetch origin main && git -C "$APP" reset --hard origin/main; else rm -rf "$APP" && git clone --depth=1 "$REPO" "$APP"; fi
 cd "$APP"; python3 -m venv .venv; . .venv/bin/activate; pip install -U pip; pip install -r requirements.txt
@@ -45,5 +50,9 @@ ReadWritePaths=$APP/data
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload; systemctl enable --now v2ray-monitor-seller.service
-systemctl --no-pager --full status v2ray-monitor-seller.service || true
+if ! systemctl is-active --quiet v2ray-monitor-seller.service; then
+  journalctl -u v2ray-monitor-seller.service --no-pager -n 80 || true
+  echo 'ERROR: seller service failed to start' >&2
+  exit 1
+fi
 echo "Installed: http://SERVER-IP:$PORT"
