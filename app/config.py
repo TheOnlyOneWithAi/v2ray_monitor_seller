@@ -1,6 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from cryptography.fernet import Fernet
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
     bot_token: str = ''
@@ -13,6 +12,7 @@ class Settings(BaseSettings):
     monitor_bot_url: str = ''
     monitor_api_url: str = ''
     monitor_api_token: str = ''
+    monitor_webapp_url: str = ''
     force_join_enabled: bool = True
     force_join_channel: str = ''
     force_join_channel_url: str = ''
