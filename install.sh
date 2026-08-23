@@ -1,26 +1,52 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
-[[ ${EUID:-0} -eq 0 ]] || { echo 'Run as root'; exit 1; }
-APP=/opt/v2ray-monitor-seller
-REPO=https://github.com/TheOnlyOneWithAi/v2ray_monitor_seller.git
-ask(){ local v=''; while [[ -z "$v" ]]; do read -r -p "$1: " v; done; printf '%s' "$v"; }
-apt-get update -y && apt-get install -y ca-certificates git python3 python3-venv python3-pip
+# Seller installer - intentionally does not use `set -u` so unset environment
+# variables can never abort installation. Existing functionality is preserved.
+set -Ee
 
-# Use only canonical variables. Safe with `set -u` and supports multiple admins.
+if [ "$(id -u)" -ne 0 ]; then echo "Run as root" >&2; exit 1; fi
+APP="/opt/v2ray-monitor-seller"
+REPO="https://github.com/TheOnlyOneWithAi/v2ray_monitor_seller.git"
+
+ask() {
+    local v=""
+    while [ -z "$v" ]; do
+        printf '%s: ' "$1" >&2
+        IFS= read -r v || exit 1
+    done
+    printf '%s' "$v"
+}
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y ca-certificates git python3 python3-venv python3-pip
+
 TOKEN="${BOT_TOKEN:-}"
-if [[ -z "$TOKEN" ]]; then TOKEN="$(ask 'Telegram Bot Token')"; fi
+if [ -z "$TOKEN" ]; then TOKEN="$(ask 'Telegram Bot Token')"; fi
+
 ADMIN_IDS_VALUE="${ADMIN_IDS:-}"
-if [[ -z "$ADMIN_IDS_VALUE" ]]; then ADMIN_IDS_VALUE="$(ask 'Admin Telegram ID(s), comma-separated')"; fi
+if [ -z "$ADMIN_IDS_VALUE" ]; then ADMIN_IDS_VALUE="$(ask 'Admin Telegram ID(s), comma-separated')"; fi
+
 PORT="${WEB_PORT:-8090}"
+case "$PORT" in
+    ''|*[!0-9]*) echo "Invalid WEB_PORT: $PORT" >&2; exit 1 ;;
+esac
 
 mkdir -p /opt
-if [[ -d "$APP/.git" ]]; then git -C "$APP" fetch origin main && git -C "$APP" reset --hard origin/main; else rm -rf "$APP" && git clone --depth=1 "$REPO" "$APP"; fi
+if [ -d "$APP/.git" ]; then
+    git -C "$APP" fetch origin main
+    git -C "$APP" reset --hard origin/main
+else
+    rm -rf "$APP"
+    git clone --depth=1 --branch main "$REPO" "$APP"
+fi
+
 cd "$APP"
 python3 -m venv .venv
-. .venv/bin/activate
-pip install -U pip
-pip install -r requirements.txt
-KEY="$(python -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())')"
+. "$APP/.venv/bin/activate"
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+
+KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
 mkdir -p data
 cat > .env <<EOF
 BOT_TOKEN=$TOKEN
@@ -30,13 +56,16 @@ DATABASE_URL=sqlite+aiosqlite:///./data/seller.db
 ENCRYPTION_KEY=$KEY
 EOF
 chmod 600 .env
+
 id v2ray-seller >/dev/null 2>&1 || useradd --system --home "$APP" --shell /usr/sbin/nologin v2ray-seller
 chown -R v2ray-seller:v2ray-seller "$APP/data"
-cat >/etc/systemd/system/v2ray-monitor-seller.service <<EOF
+
+cat > /etc/systemd/system/v2ray-monitor-seller.service <<EOF
 [Unit]
 Description=V2Ray Monitor Seller Bot
 After=network-online.target
 Wants=network-online.target
+
 [Service]
 User=v2ray-seller
 Group=v2ray-seller
@@ -50,14 +79,18 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=$APP/data
+
 [Install]
 WantedBy=multi-user.target
 EOF
+
 systemctl daemon-reload
 systemctl enable --now v2ray-monitor-seller.service
 if ! systemctl is-active --quiet v2ray-monitor-seller.service; then
-  journalctl -u v2ray-monitor-seller.service --no-pager -n 80 || true
-  echo 'ERROR: seller service failed to start' >&2
-  exit 1
+    journalctl -u v2ray-monitor-seller.service --no-pager -n 80 || true
+    echo "ERROR: seller service failed to start" >&2
+    exit 1
 fi
+
 echo "Installed: http://SERVER-IP:$PORT"
+echo "Service: systemctl status v2ray-monitor-seller"
