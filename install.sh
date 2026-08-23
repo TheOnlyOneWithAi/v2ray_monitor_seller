@@ -6,11 +6,11 @@ REPO=https://github.com/TheOnlyOneWithAi/v2ray_monitor_seller.git
 ask(){ local v=''; while [[ -z "$v" ]]; do read -r -p "$1: " v; done; printf '%s' "$v"; }
 apt-get update -y && apt-get install -y ca-certificates git python3 python3-venv python3-pip
 
-# Never reference an unset variable under `set -u`.
+# ADMIN_IDS is the canonical name. Multiple admins are supported as a
+# comma-separated value (for example: 123456,789012).
 TOKEN="${BOT_TOKEN-}"
 if [[ -z "$TOKEN" ]]; then TOKEN="$(ask 'Telegram Bot Token')"; fi
 ADMIN_IDS_VALUE="${ADMIN_IDS-}"
-if [[ -z "$ADMIN_IDS_VALUE" ]]; then ADMIN_IDS_VALUE="${ADMINS-}"; fi
 if [[ -z "$ADMIN_IDS_VALUE" ]]; then ADMIN_IDS_VALUE="$(ask 'Admin Telegram ID(s), comma-separated')"; fi
 PORT="${WEB_PORT-8090}"
 
