@@ -11,12 +11,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class Settings(BaseSettings):
-    """Seller configuration.
-
-    SELLER_BOT_TOKEN is intentionally separate from the Monitor bot token.
-    BOT_TOKEN is accepted as a backwards-compatible fallback for existing
-    installations, but new installations should use SELLER_BOT_TOKEN.
-    """
+    """Seller configuration for the integrated Monitor installation."""
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
@@ -34,8 +29,7 @@ class Settings(BaseSettings):
     encryption_key: str = ""
     monitor_bot_token: str = ""
     monitor_bot_url: str = ""
-    monitor_api_url: str = ""
-    monitor_api_token: str = ""
+    monitor_api_url: str = "http://127.0.0.1:8091"
     monitor_webapp_url: str = ""
     force_join_enabled: bool = False
     force_join_channel: str = ""
