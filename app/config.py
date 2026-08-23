@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     monitor_bot_token: str = ""
     monitor_bot_url: str = ""
     monitor_api_url: str = "http://127.0.0.1:8091"
+    # Compatibility value only. It is never requested from the user and is
+    # not written to .env. Monitor ignores the legacy header.
+    monitor_api_token: str = "local-internal"
     monitor_webapp_url: str = ""
     force_join_enabled: bool = False
     force_join_channel: str = ""
