@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -6,6 +8,8 @@ from sqlalchemy import select
 from datetime import datetime, timedelta, timezone
 from .config import settings
 from .db import Session, Plan, User, Order, Subscription, Setting
+
+log = logging.getLogger(__name__)
 
 def kb(rows): return InlineKeyboardMarkup(inline_keyboard=rows)
 def parse_pair(text):
@@ -25,7 +29,8 @@ async def is_joined(bot,uid):
     try:
         m=await bot.get_chat_member(channel,uid)
         return m.status in {ChatMemberStatus.MEMBER,ChatMemberStatus.ADMINISTRATOR,ChatMemberStatus.CREATOR}
-    except Exception:return False
+    except Exception:
+        return False
 async def gate(m,bot):
     if await is_joined(bot,m.from_user.id): return True
     ch=await cfg('force_join_channel',settings.force_join_channel); url=await cfg('force_join_channel_url',settings.force_join_channel_url) or ('https://t.me/'+ch.lstrip('@'))
@@ -66,7 +71,7 @@ async def receipt(m:Message,bot:Bot):
     await m.answer(f'🧾 رسید سفارش #{oid} ثبت شد و برای بررسی ادمین ارسال می‌شود.')
     for aid in settings.admins:
         try:await bot.send_message(aid,f'🧾 سفارش #{oid}\nکاربر: {m.from_user.id}',reply_markup=kb([[InlineKeyboardButton(text='✅ تأیید',callback_data=f'approve:{oid}'),InlineKeyboardButton(text='❌ رد',callback_data=f'reject:{oid}')]]))
-        except Exception:pass
+        except Exception:log.exception('failed to notify admin %s', aid)
 async def approve(c:CallbackQuery,bot:Bot):
     if c.from_user.id not in settings.admins:return
     oid=int(c.data.split(':')[1])
@@ -101,7 +106,16 @@ async def orders(m:Message):
     await m.answer('\n'.join(f'#{o.id} — {o.status} — user:{o.user_id}' for o in os) or 'سفارشی نیست.')
 async def status(m:Message):
     if m.from_user.id in settings.admins:await m.answer(f'Bot فعال\nAdmin IDs: {len(settings.admins)}\nJoin: {await cfg("force_join_enabled","true")}')
+
+async def run_polling(dp, bot):
+    # Telegram allows only one active long-polling consumer per bot token.
+    # Removing a stale webhook before polling prevents a common silent startup failure.
+    await bot.delete_webhook(drop_pending_updates=False)
+    me = await bot.get_me()
+    log.info('Seller bot connected as @%s (%s)', me.username, me.id)
+    await dp.start_polling(bot)
+
 def build_bot():
     bot=Bot(settings.bot_token);dp=Dispatcher()
     dp.message.register(start,Command('start'));dp.callback_query.register(checkjoin,F.data=='checkjoin');dp.callback_query.register(showplans,F.data=='plans');dp.callback_query.register(choose,F.data.startswith('plan:'));dp.message.register(receipt,F.photo|F.text);dp.callback_query.register(approve,F.data.startswith('approve:'));dp.callback_query.register(reject,F.data.startswith('reject:'));dp.message.register(admin,Command('admin'));dp.message.register(setcard,Command('setcard'));dp.message.register(setjoin,Command('setjoin'));dp.message.register(lambda m:togglejoin(m,False),Command('setjoinoff'));dp.message.register(lambda m:togglejoin(m,True),Command('setjoinon'));dp.message.register(lambda m:settext(m,'welcome','متن خوشامد'),Command('setwelcome'));dp.message.register(lambda m:settext(m,'payment_instructions','متن پرداخت'),Command('setpayment'));dp.message.register(orders,Command('orders'));dp.message.register(status,Command('status'))
-    return type('Runner',(),{'start':lambda self:dp.start_polling(bot)})()
+    return type('Runner',(),{'start':lambda self:run_polling(dp,bot)})()
