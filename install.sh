@@ -16,18 +16,20 @@ ADMIN_IDS_VALUE="${ADMIN_IDS:-}"
 [ -n "$ADMIN_IDS_VALUE" ] || ADMIN_IDS_VALUE="$(prompt 'Admin Telegram ID(s), comma-separated')"
 PORT="${WEB_PORT:-8090}"
 case "$PORT" in ''|*[!0-9]*) echo "Invalid WEB_PORT: $PORT" >&2; exit 1;; esac
+(( PORT >= 1 && PORT <= 65535 )) || { echo "Invalid WEB_PORT: $PORT" >&2; exit 1; }
 # Automatically link Seller to the installed Monitor.
 MONITOR_API_URL="${MONITOR_API_URL:-}"
 MONITOR_API_TOKEN="${MONITOR_API_TOKEN:-}"
+MONITOR_PORT=""
 if [ -f "$MONITOR_APP/.env" ]; then
     [ -n "$MONITOR_API_TOKEN" ] || MONITOR_API_TOKEN="$(sed -n 's/^SELLER_API_TOKEN=//p' "$MONITOR_APP/.env" | head -n1 | sed 's/^"//; s/"$//')"
-    [ -n "$MONITOR_API_URL" ] || MONITOR_API_URL="$(sed -n 's/^WEB_PORT=//p' "$MONITOR_APP/.env" | head -n1 | sed 's/^"//; s/"$//')"
-    [ -n "$MONITOR_API_URL" ] && MONITOR_API_URL="http://127.0.0.1:${MONITOR_API_URL}"
+    MONITOR_PORT="$(sed -n 's/^WEB_PORT=//p' "$MONITOR_APP/.env" | head -n1 | sed 's/^"//; s/"$//')"
+    if [ -z "$MONITOR_API_URL" ] && [ -n "$MONITOR_PORT" ]; then MONITOR_API_URL="http://127.0.0.1:${MONITOR_PORT}"; fi
 fi
-MONITOR_API_URL="${MONITOR_API_URL:-http://127.0.0.1:8091}"
+MONITOR_API_URL="${MONITOR_API_URL:-http://127.0.0.1:8000}"
 MONITOR_API_TOKEN="${MONITOR_API_TOKEN:-}"
 [ -n "$MONITOR_API_TOKEN" ] || MONITOR_API_TOKEN="$(prompt 'Monitor SELLER_API_TOKEN (only if Monitor was not installed here)')"
-MONITOR_WEBAPP_URL="${MONITOR_WEBAPP_URL:-http://127.0.0.1:8091}"
+MONITOR_WEBAPP_URL="${MONITOR_WEBAPP_URL:-http://127.0.0.1:8000}"
 mkdir -p /opt
 if [ -d "$APP/.git" ]; then
     git -C "$APP" config --local --add safe.directory "$APP" 2>/dev/null || true
@@ -46,14 +48,14 @@ id v2ray-seller >/dev/null 2>&1 || useradd --system --home "$APP" --shell /usr/s
 KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
 mkdir -p data
 cat > .env <<EOF
-SELLER_BOT_TOKEN=$TOKEN
-ADMIN_IDS=$ADMIN_IDS_VALUE
-WEB_PORT=$PORT
-DATABASE_URL=sqlite+aiosqlite:///$APP/data/seller.db
-ENCRYPTION_KEY=$KEY
-MONITOR_API_URL=$MONITOR_API_URL
-MONITOR_API_TOKEN=$MONITOR_API_TOKEN
-MONITOR_WEBAPP_URL=$MONITOR_WEBAPP_URL
+SELLER_BOT_TOKEN="$(printf '%s' "$TOKEN" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+ADMIN_IDS="$(printf '%s' "$ADMIN_IDS_VALUE" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+WEB_PORT="$PORT"
+DATABASE_URL="sqlite+aiosqlite:///$APP/data/seller.db"
+ENCRYPTION_KEY="$KEY"
+MONITOR_API_URL="$(printf '%s' "$MONITOR_API_URL" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+MONITOR_API_TOKEN="$(printf '%s' "$MONITOR_API_TOKEN" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+MONITOR_WEBAPP_URL="$(printf '%s' "$MONITOR_WEBAPP_URL" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 EOF
 chown -R v2ray-seller:v2ray-seller "$APP"
 chmod 750 "$APP"
@@ -65,28 +67,32 @@ cat >/etc/systemd/system/v2ray-monitor-seller.service <<EOF
 Description=V2Ray Monitor Seller Bot
 After=network-online.target v2ray-monitor.service
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
 [Service]
 Type=simple
 User=v2ray-seller
 Group=v2ray-seller
 WorkingDirectory=$APP
-EnvironmentFile=$APP/.env
 Environment=PYTHONUNBUFFERED=1
 ExecStart=$APP/.venv/bin/python -m app.main
 Restart=always
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=$APP/data
+
 [Install]
 WantedBy=multi-user.target
 EOF
+systemd-analyze verify /etc/systemd/system/v2ray-monitor-seller.service || { echo 'ERROR: invalid seller systemd unit' >&2; exit 1; }
 systemctl daemon-reload
-systemctl enable --now v2ray-monitor-seller.service
+systemctl enable v2ray-monitor-seller.service >/dev/null
+systemctl reset-failed v2ray-monitor-seller.service 2>/dev/null || true
+systemctl restart v2ray-monitor-seller.service
 sleep 2
 if ! systemctl is-active --quiet v2ray-monitor-seller.service; then journalctl -u v2ray-monitor-seller.service --no-pager -n 80 || true; echo 'ERROR: seller service failed to start' >&2; exit 1; fi
 echo "Seller installed successfully."
