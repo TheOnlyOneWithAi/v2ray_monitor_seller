@@ -1,19 +1,35 @@
 #!/usr/bin/env bash
-# Seller installer - intentionally does not use `set -u` so unset environment
-# variables can never abort installation. Existing functionality is preserved.
+# V2Ray Monitor Seller installer
+# Safe for: curl ... | bash
+# Do not use `set -u`: environment variables are optional.
 set -Ee
 
-if [ "$(id -u)" -ne 0 ]; then echo "Run as root" >&2; exit 1; fi
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run as root" >&2
+    exit 1
+fi
+
 APP="/opt/v2ray-monitor-seller"
 REPO="https://github.com/TheOnlyOneWithAi/v2ray_monitor_seller.git"
+TTY="/dev/tty"
 
-ask() {
-    local v=""
-    while [ -z "$v" ]; do
-        printf '%s: ' "$1" >&2
-        IFS= read -r v || exit 1
+prompt() {
+    _prompt_value=""
+    while [ -z "$_prompt_value" ]; do
+        printf '%s: ' "$1" > "$TTY"
+        IFS= read -r _prompt_value < "$TTY" || {
+            echo "Unable to read interactive input from $TTY" >&2
+            exit 1
+        }
     done
-    printf '%s' "$v"
+    printf '%s' "$_prompt_value"
+}
+
+prompt_optional() {
+    _prompt_value=""
+    printf '%s: ' "$1" > "$TTY"
+    IFS= read -r _prompt_value < "$TTY" || _prompt_value=""
+    printf '%s' "$_prompt_value"
 }
 
 export DEBIAN_FRONTEND=noninteractive
@@ -21,19 +37,35 @@ apt-get update -y
 apt-get install -y ca-certificates git python3 python3-venv python3-pip
 
 TOKEN="${BOT_TOKEN:-}"
-if [ -z "$TOKEN" ]; then TOKEN="$(ask 'Telegram Bot Token')"; fi
+if [ -z "$TOKEN" ]; then
+    TOKEN="$(prompt 'Telegram Bot Token')"
+fi
 
 ADMIN_IDS_VALUE="${ADMIN_IDS:-}"
-if [ -z "$ADMIN_IDS_VALUE" ]; then ADMIN_IDS_VALUE="$(ask 'Admin Telegram ID(s), comma-separated')"; fi
+if [ -z "$ADMIN_IDS_VALUE" ]; then
+    ADMIN_IDS_VALUE="$(prompt 'Admin Telegram ID(s), comma-separated')"
+fi
 
-PORT="${WEB_PORT:-8090}"
+PORT="${WEB_PORT:-}"
+if [ -z "$PORT" ]; then
+    PORT="$(prompt_optional 'Web Port [8090]')"
+fi
+[ -z "$PORT" ] && PORT="8090"
+
 case "$PORT" in
-    ''|*[!0-9]*) echo "Invalid WEB_PORT: $PORT" >&2; exit 1 ;;
+    ''|*[!0-9]*)
+        echo "Invalid WEB_PORT: $PORT" >&2
+        exit 1
+        ;;
 esac
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+    echo "WEB_PORT must be between 1 and 65535" >&2
+    exit 1
+fi
 
 mkdir -p /opt
 if [ -d "$APP/.git" ]; then
-    git -C "$APP" fetch origin main
+    git -C "$APP" fetch --depth=1 origin main
     git -C "$APP" reset --hard origin/main
 else
     rm -rf "$APP"
@@ -86,11 +118,14 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --now v2ray-monitor-seller.service
+
 if ! systemctl is-active --quiet v2ray-monitor-seller.service; then
     journalctl -u v2ray-monitor-seller.service --no-pager -n 80 || true
     echo "ERROR: seller service failed to start" >&2
     exit 1
 fi
 
-echo "Installed: http://SERVER-IP:$PORT"
+echo ""
+echo "V2Ray Monitor Seller installed successfully."
+echo "Web Port: $PORT"
 echo "Service: systemctl status v2ray-monitor-seller"
