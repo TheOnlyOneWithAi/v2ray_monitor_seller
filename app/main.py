@@ -21,8 +21,8 @@ async def main() -> None:
         settings.setup_interactive()
         settings.validate_runtime()
 
-    from .api import app
     from .db import init_db
+    from .web import app
     await init_db()
 
     bot_task = asyncio.create_task(run_bot_safely(), name="seller-bot")
